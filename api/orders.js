@@ -147,6 +147,7 @@ export default async function handler(req, res) {
 
       // Write RESERVA (one row per item)
       // Columns (suggested header): orderId, createdAt, expiresAt, status, deliveryDate, sku, descricao, qty, unidade, clientNome
+      const appendPromises = [];
       for (const it of items) {
         const product = it.product || it;
         const sku = String(product.sku || it.sku || '');
@@ -154,7 +155,7 @@ export default async function handler(req, res) {
         if (!sku || qty <= 0) continue;
 
         const unidade = Number(sku) >= 410000 ? 'CX' : 'UND';
-        await appendRow(sheets, spreadsheetId, reservaSheet, [
+        appendPromises.push(appendRow(sheets, spreadsheetId, reservaSheet, [
           orderId,
           createdAt,
           expiresAt,
@@ -165,8 +166,9 @@ export default async function handler(req, res) {
           qty,
           unidade,
           client.nome || client.name || ''
-        ]);
+        ]));
       }
+      if (appendPromises.length) await Promise.all(appendPromises);
 
       return json(res, 200, {
         ok: true,
@@ -223,7 +225,30 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
-    return json(res, 400, { ok: false, error: 'Ação inválida. Use action=reserve|confirm' });
+    if (action === 'cancel') {
+      const orderId = payload.orderId;
+      if (!orderId) return json(res, 400, { ok: false, error: 'orderId é obrigatório' });
+
+      const pedidos = await getAllRows(sheets, spreadsheetId, pedidosSheet);
+      const reserva = await getAllRows(sheets, spreadsheetId, reservaSheet);
+
+      const pedidosHeader = pedidos[0] || [];
+      const reservaHeader = reserva[0] || [];
+      const pedidosIdxId = pedidosHeader.indexOf('orderId');
+      const pedidosIdxStatus = pedidosHeader.indexOf('status');
+      const reservaIdxId = reservaHeader.indexOf('orderId');
+      const reservaIdxStatus = reservaHeader.indexOf('status');
+
+      if (pedidosIdxId === -1 || pedidosIdxStatus === -1 || reservaIdxId === -1 || reservaIdxStatus === -1) return json(res, 400, { ok: false, error: 'Cabeçalho das abas PEDIDOS/RESERVA não está no formato esperado.' });
+
+      const updates = [];
+      for (let r = 1; r < pedidos.length; r++) if (String(pedidos[r][pedidosIdxId]) === String(orderId)) updates.push({ range: `${pedidosSheet}!${colToA1(pedidosIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
+      for (let r = 1; r < reserva.length; r++) if (String(reserva[r][reservaIdxId]) === String(orderId)) updates.push({ range: `${reservaSheet}!${colToA1(reservaIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
+      if (updates.length) await batchUpdateValues(sheets, spreadsheetId, updates);
+      return json(res, 200, { ok: true, canceled: true, orderId });
+    }
+
+    return json(res, 400, { ok: false, error: 'Ação inválida. Use action=reserve|confirm|cancel' });
   } catch (err) {
     console.error(err);
     return json(res, 500, { ok: false, error: err.message || 'Erro interno' });
