@@ -1,1 +1,0 @@
-package-lock removido para evitar inconsistência em ambientes sem lock atualizado
