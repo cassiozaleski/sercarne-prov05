@@ -147,6 +147,7 @@ export default async function handler(req, res) {
 
       // Write RESERVA (one row per item)
       // Columns (suggested header): orderId, createdAt, expiresAt, status, deliveryDate, sku, descricao, qty, unidade, clientNome
+      // Para melhorar latência, paralelizamos as appendRow aqui (mantendo compatibilidade)
       const appendPromises = [];
       for (const it of items) {
         const product = it.product || it;
@@ -168,6 +169,9 @@ export default async function handler(req, res) {
           client.nome || client.name || ''
         ]));
       }
+      if (appendPromises.length) await Promise.all(appendPromises);
+
+      // Espera todas as gravações terminarem
       if (appendPromises.length) await Promise.all(appendPromises);
 
       return json(res, 200, {
@@ -225,6 +229,7 @@ export default async function handler(req, res) {
       return json(res, 200, { ok: true });
     }
 
+    // NOVO: ação 'cancel' para suportar cancelamento via front (cancelOrder)
     if (action === 'cancel') {
       const orderId = payload.orderId;
       if (!orderId) return json(res, 400, { ok: false, error: 'orderId é obrigatório' });
@@ -244,6 +249,32 @@ export default async function handler(req, res) {
       const updates = [];
       for (let r = 1; r < pedidos.length; r++) if (String(pedidos[r][pedidosIdxId]) === String(orderId)) updates.push({ range: `${pedidosSheet}!${colToA1(pedidosIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
       for (let r = 1; r < reserva.length; r++) if (String(reserva[r][reservaIdxId]) === String(orderId)) updates.push({ range: `${reservaSheet}!${colToA1(reservaIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
+      if (pedidosIdxId === -1 || pedidosIdxStatus === -1 || reservaIdxId === -1 || reservaIdxStatus === -1) {
+        return json(res, 400, { ok: false, error: 'Cabeçalho das abas PEDIDOS/RESERVA não está no formato esperado.' });
+      }
+
+      const updates = [];
+
+      // atualiza status em PEDIDOS para CANCELADO
+      for (let r = 1; r < pedidos.length; r++) {
+        if (String(pedidos[r][pedidosIdxId]) === String(orderId)) {
+          updates.push({
+            range: `${pedidosSheet}!${colToA1(pedidosIdxStatus + 1)}${r + 1}`,
+            values: [['CANCELADO']]
+          });
+        }
+      }
+
+      // atualiza status em RESERVA para CANCELADO
+      for (let r = 1; r < reserva.length; r++) {
+        if (String(reserva[r][reservaIdxId]) === String(orderId)) {
+          updates.push({
+            range: `${reservaSheet}!${colToA1(reservaIdxStatus + 1)}${r + 1}`,
+            values: [['CANCELADO']]
+          });
+        }
+      }
+
       if (updates.length) await batchUpdateValues(sheets, spreadsheetId, updates);
       return json(res, 200, { ok: true, canceled: true, orderId });
     }
