@@ -169,6 +169,7 @@ export default async function handler(req, res) {
           client.nome || client.name || ''
         ]));
       }
+      if (appendPromises.length) await Promise.all(appendPromises);
 
       // Espera todas as gravações terminarem
       if (appendPromises.length) await Promise.all(appendPromises);
@@ -243,6 +244,11 @@ export default async function handler(req, res) {
       const reservaIdxId = reservaHeader.indexOf('orderId');
       const reservaIdxStatus = reservaHeader.indexOf('status');
 
+      if (pedidosIdxId === -1 || pedidosIdxStatus === -1 || reservaIdxId === -1 || reservaIdxStatus === -1) return json(res, 400, { ok: false, error: 'Cabeçalho das abas PEDIDOS/RESERVA não está no formato esperado.' });
+
+      const updates = [];
+      for (let r = 1; r < pedidos.length; r++) if (String(pedidos[r][pedidosIdxId]) === String(orderId)) updates.push({ range: `${pedidosSheet}!${colToA1(pedidosIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
+      for (let r = 1; r < reserva.length; r++) if (String(reserva[r][reservaIdxId]) === String(orderId)) updates.push({ range: `${reservaSheet}!${colToA1(reservaIdxStatus + 1)}${r + 1}`, values: [['CANCELADO']] });
       if (pedidosIdxId === -1 || pedidosIdxStatus === -1 || reservaIdxId === -1 || reservaIdxStatus === -1) {
         return json(res, 400, { ok: false, error: 'Cabeçalho das abas PEDIDOS/RESERVA não está no formato esperado.' });
       }
